@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+    <title>NOVA HUD</title>
+    <script type="module" crossorigin src="./assets/index-BUHEuioR.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-DsAqx0kS.css">
+  </head>
+  <body>
+    <div id="root"></div>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         BACKUP DOM CONTROLLER — Belt-and-suspenders approach
+         This inline script provides a direct DOM-level fallback to
+         ensure the minimap section hides/shows correctly even if
+         React state doesn't update properly (e.g., FiveM CEF caching).
+         ═══════════════════════════════════════════════════════════════ -->
+    <style>
+      #nova-weapon-hud {
+        position: fixed;
+        bottom: 16px;
+        right: 16px;
+        z-index: 9998;
+        display: none;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 2px;
+        pointer-events: none;
+        font-family: 'Rajdhani', 'Inter', sans-serif;
+      }
+      #nova-weapon-icon-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 6px 14px;
+        background: rgba(0, 0, 0, 0.75);
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 4px;
+      }
+      #nova-weapon-svg {
+        width: 52px;
+        height: 24px;
+        color: rgba(255, 255, 255, 0.9);
+        fill: currentColor;
+        flex-shrink: 0;
+        filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5));
+      }
+      #nova-weapon-ammo {
+        display: flex;
+        align-items: baseline;
+        gap: 3px;
+        font-variant-numeric: tabular-nums;
+      }
+      #nova-ammo-clip {
+        font-size: 18px;
+        font-weight: 700;
+        color: #fff;
+        line-height: 1;
+      }
+      #nova-ammo-sep {
+        font-size: 13px;
+        color: rgba(255, 255, 255, 0.3);
+        font-weight: 400;
+      }
+      #nova-ammo-total {
+        font-size: 13px;
+        font-weight: 500;
+        color: rgba(255, 255, 255, 0.45);
+        line-height: 1;
+      }
+      #nova-ammo-clip.low { color: #ef4444; }
+
+    </style>
+
+    <div id="nova-weapon-hud">
+      <div id="nova-weapon-icon-row">
+        <svg id="nova-weapon-svg" viewBox="0 0 64 28"></svg>
+        <div id="nova-weapon-ammo">
+          <span id="nova-ammo-clip">0</span>
+          <span id="nova-ammo-sep">/</span>
+          <span id="nova-ammo-total">0</span>
+        </div>
+      </div>
+    </div>
+
+    <script>
+    (function() {
+      var _inVehicle = false;
+
+      var weaponSVGs = {
+        pistol: '<path d="M19 5h17c1 0 2 1 2 2v5h3c.5 0 1 .5 1 1v2c0 .5-.5 1-1 1h-3v1c0 .5-.5 1-1 1h-4v3c0 1.5-1 2.5-2.5 2.5h-1c-1.5 0-2.5-1-2.5-2.5v-3h-4v3.5c0 1.5-1 2.5-2.5 2.5H19c-1.5 0-2.5-1-2.5-2.5V16c0-1 .5-2.5 1.5-4l2-2.5c.5-.5 1-1 2-1V7c-1.5 0-2.5-.5-2.5-1V5z"/>',
+        smg: '<path d="M6 9h5V7h5V5h22c1.5 0 2.5 1 2.5 2v5h4c.5 0 1 .5 1 1v2c0 .5-.5 1-1 1h-4v1c0 .5-.5 1-1 1H32v5c0 1-1 2-2 2h-2c-1 0-2-1-2-2v-5h-5v3c0 .5-.5 1-1 1h-3c-.5 0-1-.5-1-1v-3H12c-1 0-2-.5-3-1.5L6 13V9z"/>',
+        rifle: '<path d="M2 10l2-2h4l2-2h4v2h3V5h22c1.5 0 2.5 1 2.5 2.5V11h5c.5 0 1 .5 1 1v2c0 .5-.5 1-1 1h-5v1c0 .5-.5 1-1 1H33v4.5c0 1-1 2-2 2h-2c-1 0-2-1-2-2V17H17l-2 2h-3v-3H8l-3-1.5L2 13V10z"/>',
+        shotgun: '<path d="M3 10l2-2h3l2-2h4v2h36c1 0 2 1 2 2v4c0 1-1 2-2 2H18v1l-1 2h-3l1-3H10l-3-1L3 14V10z M15 17h3v4c0 .5-.5 1-1 1h-1c-.5 0-1-.5-1-1v-4z"/>',
+        sniper: '<path d="M2 11l2-2h4V7h4v2h38c1 0 2 .5 2 1.5v3c0 1-1 1.5-2 1.5H14v2l-1 1h-3l1-3H8l-3-1L2 14V11z M18 4h22c.5 0 1 .5 1 1v2c0 .5-.5 1-1 1H18c-.5 0-1-.5-1-1V5c0-.5.5-1 1-1z"/>',
+        melee: '<path d="M40 1c1 0 2 .5 3 1.5l2 2c1 1 1.5 2 1.5 3L26 22h-3v3l-4 3-3-3 3-4h3V18L40 1z M8 24l3-3 3 3-3 3-3-3z"/>',
+        throwable: '<path d="M26 7c-5 0-9 4-9 9s4 9 9 9 9-4 9-9-4-9-9-9zm0 3c3.3 0 6 2.7 6 6s-2.7 6-6 6-6-2.7-6-6 2.7-6 6-6z M25 3h4v4h-4V3z M30 1l3-1 1 3-3 1-1-3z"/>',
+        heavy: '<path d="M4 10h7V8h26c1 0 2 .5 2 1.5V12h6l5-2v8l-5-2h-6v2.5c0 1-1 1.5-2 1.5H11v-2H4c-1 0-2-1-2-2v-4c0-1 1-2 2-2z M46 8c.5 0 1 .5 1 1v10c0 .5-.5 1-1 1h-3c-.5 0-1-.5-1-1V9c0-.5.5-1 1-1h3z"/>',
+        unknown: '<path d="M10 8h24c1 0 2 1 2 2v8c0 1-1 2-2 2H10c-1 0-2-1-2-2v-8c0-1 1-2 2-2zm4 4v4h16v-4H14z"/>'
+      };
+
+      window.addEventListener('message', function(event) {
+        var d = event.data;
+        if (!d || !d.type) return;
+
+        if (d.type === 'updateVehicle') {
+          var nowInVehicle = (d.inVehicle === 1 || d.inVehicle === true);
+          if (nowInVehicle !== _inVehicle) {
+            _inVehicle = nowInVehicle;
+            applyMinimapVisibility();
+          }
+        }
+
+        if (d.type === 'updateWeapon') {
+          var hud = document.getElementById('nova-weapon-hud');
+          if (!hud) return;
+
+          if (!d.equipped) {
+            hud.style.display = 'none';
+            return;
+          }
+
+          hud.style.display = 'flex';
+          var svg = document.getElementById('nova-weapon-svg');
+          var clipEl = document.getElementById('nova-ammo-clip');
+          var totalEl = document.getElementById('nova-ammo-total');
+          var sepEl = document.getElementById('nova-ammo-sep');
+
+          if (svg) {
+            var cat = d.category || 'unknown';
+            svg.innerHTML = weaponSVGs[cat] || weaponSVGs.unknown;
+          }
+
+          var clip = d.ammoClip != null ? d.ammoClip : 0;
+          var total = d.ammoTotal != null ? d.ammoTotal : 0;
+          var isMelee = (d.category === 'melee' || d.category === 'throwable');
+
+          if (clipEl) {
+            clipEl.textContent = isMelee ? '' : clip;
+            clipEl.className = (!isMelee && clip <= 5 && clip > 0) ? 'low' : '';
+          }
+          if (sepEl) sepEl.style.display = isMelee ? 'none' : '';
+          if (totalEl) totalEl.textContent = isMelee ? '' : total;
+        }
+
+      });
+
+      function applyMinimapVisibility() {
+        var el = document.getElementById('minimap-section');
+        if (!el) return;
+        if (_inVehicle) {
+          el.style.removeProperty('bottom');
+          el.style.removeProperty('right');
+        }
+      }
+
+      setInterval(function() {
+        applyMinimapVisibility();
+      }, 500);
+    })();
+    </script>
+  </body>
+</html>
